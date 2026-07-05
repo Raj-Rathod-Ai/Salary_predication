@@ -97,31 +97,118 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# Fields list based on market demands and dynamics
+FIELDS = [
+    'AI/ML & Data Science',
+    'Software/IT',
+    'Finance & Investment Banking',
+    'Healthcare & Medical',
+    'Civil Engineering',
+    'Electrical Engineering',
+    'Mechanical Engineering',
+    'Marketing & Product Management',
+    'Human Resources (HR)'
+]
+
 # Helper function to format currency
 def format_currency_inr(val):
     return f"₹ {int(val):,}"
 
-# Train K-Nearest Neighbors Regressor (KNN) as requested
-def train_in_app():
+# Shared helper to generate synthetic field data and expand dataset size
+def generate_data():
     import pandas as pd
-    from sklearn.model_selection import train_test_split
-    from sklearn.preprocessing import StandardScaler
-    from sklearn.neighbors import KNeighborsRegressor
-    
     if not os.path.exists("Salary_dataset.csv"):
-        return
+        return None, None
         
     df = pd.read_csv("Salary_dataset.csv")
     df = df.drop('Unnamed: 0', axis=1, errors='ignore')
     
+    # Expand to 50,000 records by generating 5 augmented copies with small perturbations
+    np.random.seed(42)
+    augmented_exp = []
+    for _ in range(5):
+        noise = np.random.normal(0, 0.15, size=len(df))
+        augmented_exp.append(np.clip(df['YearsExperience'].values + noise, 0.0, 50.0))
+        
+    new_exp = np.concatenate(augmented_exp)
+    df_augmented = pd.DataFrame({'YearsExperience': new_exp})
+    
+    # Assign Field to each row synthetically in a deterministic way
+    np.random.seed(42)
+    df_augmented['Field'] = np.random.choice(FIELDS, size=len(df_augmented))
+    
+    exp = df_augmented['YearsExperience'].values
+    field = df_augmented['Field'].values
+    salaries = np.zeros(len(df_augmented))
+    
+    # AI/ML & Data Science: starts moderate (50k), grows extremely fast (curved)
+    mask = (field == 'AI/ML & Data Science')
+    salaries[mask] = 50000.0 + 35000.0 * exp[mask] + 3800.0 * (exp[mask] ** 2)
+    
+    # Software/IT: starts moderate (45k), grows at steady fast pace
+    mask = (field == 'Software/IT')
+    salaries[mask] = 45000.0 + 24000.0 * exp[mask] + 900.0 * (exp[mask] ** 2)
+    
+    # Finance & Investment Banking: starts high (70k), grows very fast
+    mask = (field == 'Finance & Investment Banking')
+    salaries[mask] = 70000.0 + 28000.0 * exp[mask] + 1200.0 * (exp[mask] ** 2)
+    
+    # Healthcare & Medical: starts high (85k), steady linear growth
+    mask = (field == 'Healthcare & Medical')
+    salaries[mask] = 85000.0 + 15000.0 * exp[mask] + 300.0 * (exp[mask] ** 2)
+    
+    # Civil Engineering: starts high (80k), grows slowly
+    mask = (field == 'Civil Engineering')
+    salaries[mask] = 80000.0 + 11000.0 * exp[mask] + 50.0 * (exp[mask] ** 2)
+    
+    # Electrical Engineering: starts high (75k), grows slowly
+    mask = (field == 'Electrical Engineering')
+    salaries[mask] = 75000.0 + 10500.0 * exp[mask] + 60.0 * (exp[mask] ** 2)
+    
+    # Mechanical Engineering: starts moderate/high (70k), grows slowly
+    mask = (field == 'Mechanical Engineering')
+    salaries[mask] = 70000.0 + 11000.0 * exp[mask] + 50.0 * (exp[mask] ** 2)
+    
+    # Marketing & Product Management: starts moderate (50k), fast growth
+    mask = (field == 'Marketing & Product Management')
+    salaries[mask] = 50000.0 + 26000.0 * exp[mask] + 1000.0 * (exp[mask] ** 2)
+    
+    # Human Resources (HR): starts low/moderate (35k), steady/slow growth
+    mask = (field == 'Human Resources (HR)')
+    salaries[mask] = 35000.0 + 12000.0 * exp[mask] + 200.0 * (exp[mask] ** 2)
+    
+    # Add noise to make it realistic
+    np.random.seed(100)
+    noise = np.random.normal(0, salaries * 0.03)
+    df_augmented['Salary'] = np.clip(salaries + noise, 20000.0, None)
+    
+    # One-hot encode Field
+    df_encoded = pd.get_dummies(df_augmented, columns=['Field'], drop_first=False)
+    feature_cols = ['YearsExperience'] + [f'Field_{f}' for f in FIELDS]
+    for col in feature_cols:
+        if col not in df_encoded.columns:
+            df_encoded[col] = 0
+            
+    return df_encoded[feature_cols], df_encoded['Salary']
+
+# Train K-Nearest Neighbors Regressor (KNN) with multiple fields
+def train_in_app():
+    from sklearn.model_selection import train_test_split
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.neighbors import KNeighborsRegressor
+    
+    X, y = generate_data()
+    if X is None:
+        return
+        
     x_train, x_test, y_train, y_test = train_test_split(
-        df.drop('Salary', axis=1), df['Salary'], test_size=0.2, random_state=42
+        X, y, test_size=0.2, random_state=42
     )
     
     scaler = StandardScaler()
     x_train = scaler.fit_transform(x_train)
     
-    # KNN Regressor (n_neighbors=5 provides smooth fit over 10,000 points)
+    # KNN Regressor (n_neighbors=5 provides smooth fit over 50,000 points)
     model = KNeighborsRegressor(n_neighbors=5)
     model.fit(x_train, y_train)
     
@@ -151,12 +238,10 @@ def load_artifacts():
             
     # Calculate R2 accuracy
     try:
-        import pandas as pd
         from sklearn.model_selection import train_test_split
-        df = pd.read_csv("Salary_dataset.csv")
-        df = df.drop('Unnamed: 0', axis=1, errors='ignore')
+        X, y = generate_data()
         x_train, x_test, y_train, y_test = train_test_split(
-            df.drop('Salary', axis=1), df['Salary'], test_size=0.2, random_state=42
+            X, y, test_size=0.2, random_state=42
         )
         x_test_scaled = scaler.transform(x_test) if scaler is not None else x_test
         r2 = model.score(x_test_scaled, y_test) * 100
@@ -172,7 +257,7 @@ st.markdown("""
 <div class="text-center" style="margin-top: 30px; margin-bottom: 30px;">
     <span style="font-size: 3.5rem;">💼</span>
     <h1 class="gradient-title">AI Salary Predictor</h1>
-    <p class="text-secondary">Predict your estimated monthly salary using Machine Learning based on your professional experience.</p>
+    <p class="text-secondary">Predict your estimated monthly salary using Machine Learning based on your professional field and experience.</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -189,12 +274,40 @@ else:
     st.markdown("""
     <div class="glass-card question-card">
         <h3 style="margin-top: 0; color: #f8fafc;">👨‍💻 Questionnaire</h3>
-        <p class="text-secondary" style="margin-bottom: 5px;">Specify your years of professional experience below:</p>
+        <p class="text-secondary" style="margin-bottom: 5px;">Specify your field and experience below:</p>
     </div>
     """, unsafe_allow_html=True)
     
-    # We place the number input neatly with label visible
+    # Inputs Container
     st.markdown('<div style="margin-top: -35px; margin-bottom: 10px; padding: 0 24px;">', unsafe_allow_html=True)
+    
+    # Custom CSS for selectbox and number input
+    st.markdown("""
+    <style>
+        div[data-testid="stSelectbox"] label {
+            color: #f8fafc !important;
+            font-weight: 600 !important;
+            font-size: 1.1rem !important;
+            margin-bottom: 8px !important;
+        }
+        div[data-testid="stSelectbox"] div[data-baseweb="select"] {
+            background-color: #1e293b !important;
+            color: #ffffff !important;
+            border: 1px solid rgba(255, 255, 255, 0.15) !important;
+            border-radius: 8px !important;
+        }
+        .stSelectbox div[data-baseweb="select"] > div {
+            color: #ffffff !important;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    selected_field = st.selectbox(
+        "Professional Field",
+        options=FIELDS,
+        index=0
+    )
+    
     years_exp = st.number_input(
         "Years of Experience",
         min_value=0.0,
@@ -211,11 +324,18 @@ else:
     """, unsafe_allow_html=True)
 
     # Perform Prediction
+    feature_cols = ['YearsExperience'] + [f'Field_{f}' for f in FIELDS]
+    input_features = [years_exp]
+    for f in FIELDS:
+        input_features.append(1.0 if f == selected_field else 0.0)
+        
+    input_array = np.array([input_features])
+    
     if scaler is not None:
-        scaled_input = scaler.transform(np.array([[years_exp]]))
+        scaled_input = scaler.transform(input_array)
         predicted_salary = model.predict(scaled_input)[0]
     else:
-        predicted_salary = model.predict(np.array([[years_exp]]))[0]
+        predicted_salary = model.predict(input_array)[0]
         
     predicted_salary = max(0.0, predicted_salary)
     
